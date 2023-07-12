@@ -1,12 +1,38 @@
 import os
 import json
+import numpy as np
 from sentence_transformers import SentenceTransformer
+
+# Function to rename files without extension in a directory and its subdirectories
+def rename_files_to_json(directory):
+    """
+    Renames files in a directory (and its subdirectories) that don't have an extension to .json.
+
+    Args:
+        directory (str): The path to the directory containing the files.
+
+    Returns:
+        None
+    """
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for filename in filenames:
+            # Get the file extension
+            _, ext = os.path.splitext(filename)
+            
+            # If the file doesn't have an extension, rename it to have .json
+            if ext == "":
+                src = os.path.join(dirpath, filename)
+                dst = os.path.join(dirpath, filename + ".json")
+                os.rename(src, dst)
 
 # Load SentenceTransformer model
 model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
 
 data = []
-folder_path = '/path/to/your/main/folder'
+folder_path = '/Users/alexcarrabre/Downloads/output_directory/AA'
+
+# Rename files in the directory
+rename_files_to_json(folder_path)
 
 for dirpath, dirnames, filenames in os.walk(folder_path):
     for filename in filenames:
@@ -15,5 +41,21 @@ for dirpath, dirnames, filenames in os.walk(folder_path):
                 for line in file:
                     data.append(json.loads(line))
 
-# Generate embeddings for each string in the data list
-embeddings = model.encode(data)
+# Check if there's any data to process
+if data:
+    # Generate embeddings for each string in the data list
+    embeddings = model.encode(data)
+
+    # Convert the list of arrays to a single 2D array
+    embeddings_array = np.vstack(embeddings)
+
+    # Save the array to a .npy file
+    np.save('embeddings.npy', embeddings_array)
+else:
+    print("No valid JSON files found in the directory.")
+
+    # Load the array
+embeddings_loaded = np.load('embeddings.npy')
+
+# Print the loaded embeddings
+print(embeddings_loaded)

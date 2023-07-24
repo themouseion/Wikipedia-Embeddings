@@ -1,61 +1,63 @@
 import os
 import json
+from transformers import AutoTokenizer
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-# Function to rename files without extension in a directory and its subdirectories
-def rename_files_to_json(directory):
-    """
-    Renames files in a directory (and its subdirectories) that don't have an extension to .json.
+# Disable parallelism to avoid deadlocks
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
-    Args:
-        directory (str): The path to the directory containing the files.
-
-    Returns:
-        None
-    """
-    for dirpath, dirnames, filenames in os.walk(directory):
-        for filename in filenames:
-            # Get the file extension
-            _, ext = os.path.splitext(filename)
-            
-            # If the file doesn't have an extension, rename it to have .json
-            if ext == "":
-                src = os.path.join(dirpath, filename)
-                dst = os.path.join(dirpath, filename + ".json")
-                os.rename(src, dst)
-
-# Load SentenceTransformer model
+tokenizer = AutoTokenizer.from_pretrained('sentence-transformers/all-MiniLM-L6-v2')
 model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+max_tokens = 512
 
-data = []
-folder_path = '/Users/alexcarrabre/Downloads/output_directory/AA'
+folder_path = '/Users/alexcarrabre/Downloads/output_directory_newcode'
+batch_size = 100
 
-# Rename files in the directory
-rename_files_to_json(folder_path)
+embeddings = []
+lines_processed = 0
 
 for dirpath, dirnames, filenames in os.walk(folder_path):
     for filename in filenames:
         if filename.endswith('.json'):
             with open(os.path.join(dirpath, filename), 'r') as file:
+                data = []
                 for line in file:
-                    data.append(json.loads(line))
+                    json_line = json.loads(line)
+                    text = json_line['text']
+                    inputs = tokenizer.encode_plus(
+                        text, 
+                        max_length=max_tokens,
+                        truncation=True,
+                        padding='max_length',
+                        return_tensors='pt'
+                    )
+                    inputs = inputs.input_ids.squeeze().tolist()
+                    text = tokenizer.decode(inputs)
+                    data.append(text)
+                    
+                    if len(data) == batch_size:
+                        batch_embeddings = model.encode(data)
+                        embeddings.extend(batch_embeddings)
+                        data = []
 
-# Check if there's any data to process
+                    lines_processed += 1
+
+                    if lines_processed % 1000 == 0:
+                        print(f'Processed {lines_processed} lines')
+
+# Process any remaining data
 if data:
-    # Generate embeddings for each string in the data list
-    embeddings = model.encode(data)
+    batch_embeddings = model.encode(data)
+    embeddings.extend(batch_embeddings)
 
-    # Convert the list of arrays to a single 2D array
-    embeddings_array = np.vstack(embeddings)
+embeddings_array = np.vstack(embeddings)
+np.save('wikipediaembeddings.npy', embeddings_array)
 
-    # Save the array to a .npy file
-    np.save('embeddings.npy', embeddings_array)
-else:
-    print("No valid JSON files found in the directory.")
+# Load embeddings
+embeddings_loaded = np.load('wikipediaembeddings.npy')
 
-    # Load the array
-embeddings_loaded = np.load('embeddings.npy')
-
-# Print the loaded embeddings
-print(embeddings_loaded)
+# If you need a DataFrame for querying
+import pandas as pd
+embeddings_df = pd.DataFrame(embeddings_loaded)
+print(embeddings_df)

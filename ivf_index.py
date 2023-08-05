@@ -34,9 +34,21 @@ for file_id in file_ids:
 # Convert list of embeddings to numpy array
 embeddings_np = np.asarray(embeddings, dtype=np.float32)
 
-# Build FAISS index
+# Define parameters for the FAISS index
 dim = len(embeddings_np[0])  # dimension of the vectors
-index = faiss.IndexFlatL2(dim)
+nlist = 50  # Number of Voronoi cells (i.e., clusters)
+k = 4  # Number of cells to visit during search
+
+# Build FAISS index
+quantizer = faiss.IndexFlatL2(dim)  # Quantizer defines the Voronoi cells
+index = faiss.IndexIVFFlat(quantizer, dim, nlist)
+
+assert not index.is_trained
+index.train(embeddings_np)
+assert index.is_trained
+
+index.nprobe = k  # Set the number of cells to visit during search
+
 index.add(embeddings_np)
 
 print(f"FAISS index built with {index.ntotal} vectors.")

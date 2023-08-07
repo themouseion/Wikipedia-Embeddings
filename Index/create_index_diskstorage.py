@@ -26,10 +26,12 @@ file_ids = sorted(list(set(int(blob.name.split('_')[-1].split('.')[0]) for blob 
 nlist = 100  # You can modify this number based on your requirements
 quantizer = faiss.IndexFlatL2(384)  # 384 is the dimension of the embeddings
 
+suffix = "_v2"  # Suffix to append to the filenames to avoid clashes
+
 for file_id in file_ids:
     try:
-        # Check if the index file already exists
-        index_file = f'paraphrase_test_index_{file_id}.faiss'
+        # Check if the index file already exists with the new suffix
+        index_file = f'paraphrase_test_index_{file_id}{suffix}.faiss'
         blob_index = bucket.blob(index_file)
         if blob_index.exists():
             logger.info(f"Index file {index_file} already exists. Skipping...")
@@ -65,8 +67,8 @@ for file_id in file_ids:
         blob_index.upload_from_filename(index_file)
         logger.info(f"FAISS index file {index_file} uploaded to Google Cloud Storage.")
 
-        # Save associated data to a file
-        data_file = f'associated_data_{file_id}.json'
+        # Save associated data to a file with the new suffix
+        data_file = f'associated_data_{file_id}{suffix}.json'
         with open(data_file, 'w') as f:
             json.dump(data, f)
         logger.info(f"Associated data file {data_file} created.")

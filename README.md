@@ -12,3 +12,9 @@ make sure to change the file paths within this repository to your respective pat
 - to update requirements.txt
 
 pip freeze > requirements.txt
+
+### Preprocessing
+
+the dataset is massive, first run the file 'splitdata.py'. This also separates the data into URL, Text & Title.
+
+###

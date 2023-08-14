@@ -29,7 +29,9 @@ index_files.sort(key=lambda name: int(name.split('_')[-1].split('.')[0]))
 
 # Define shards
 d = 384  # Dimension of the embeddings
-index_shards = faiss.IndexShards(d)
+
+# List to hold the on-disk indices
+on_disk_indices = []
 
 # Iterate through index files and add them to the shards
 for index_file_name in index_files:
@@ -51,29 +53,24 @@ for index_file_name in index_files:
         on_disk_index = faiss.IndexIVFFlat(quantizer, d, index.nlist)
         on_disk_index.own_invlists = False
 
-        # Create the OnDiskInvertedLists object
-        on_disk_invlists = faiss.OnDiskInvertedLists(index.nlist, index.code_size, on_disk_file_path)
-
-        # Replace the inverted lists of the new index with the on-disk one
-        on_disk_index.replace_invlists(on_disk_invlists)
-
-        # Add the vectors to the new index
-        xb = index.reconstruct_n(0, index.ntotal)
-        on_disk_index.train(xb)  # If the index is already trained, this will be a no-op
-        on_disk_index.add(xb)
-
-        # Add to the shards
-        index_shards.add_shard(on_disk_index)
+        # Add to the list of on-disk indices
+        on_disk_indices.append(on_disk_index)
 
         # Delete the local file
         os.remove(local_file_name)
         logger.info(f"Processed index file: {index_file_name}.")
 
+# Create a final concatenated index
+final_index = faiss.IndexFlatL2(d)
+for on_disk_index in on_disk_indices:
+    final_index = faiss.index_cpu_to_all_gpus(final_index)
+    final_index.add(on_disk_index.reconstruct_n(0, on_disk_index.ntotal))
+
 # Define the combined index file name
 combined_index_file = 'paraphrase_test_index_shards.faiss'
 
 # Save the combined index to a file
-faiss.write_index(index_shards, combined_index_file)
+faiss.write_index(final_index, combined_index_file)
 logger.info(f"Combined FAISS index file {combined_index_file} created.")
 
 # Upload the combined index file to Google Cloud Storage
@@ -84,5 +81,4 @@ logger.info(f"Combined FAISS index file {combined_index_file} uploaded to Google
 # Delete local combined index file
 os.remove(combined_index_file)
 logger.info("Local files deleted.")
-
 logger.info("Finished processing all index files.")

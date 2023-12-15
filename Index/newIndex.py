@@ -2,64 +2,63 @@ import json
 import numpy as np
 import logging
 import gc
+import os
+import psutil
 from google.cloud import storage
 from usearch.index import Index
 
+# Initialize logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+# Google Cloud Storage Client
 client = storage.Client()
 bucket_name = 'mouseion-embeddings'
 bucket = client.bucket(bucket_name)
 
-def load_embeddings_and_metadata(file_number):
-    embeddings_dict = {}
-    metadata_dict = {}
-
+def load_embeddings(file_number):
     emb_blob_name = f'embeddings_paraphrase_{file_number}.json'
     emb_blob = bucket.blob(emb_blob_name)
-    logging.info(f"Loading embeddings from file: {emb_blob_name}")
-
-    embeddings_data = json.loads(emb_blob.download_as_text())
-    for data in embeddings_data:
-        embeddings_dict[data['unique_id']] = np.array(data['embedding'], dtype=np.float32)
-
-    # Load the associated metadata
-    metadata_blob_name = f'associated_data_{file_number}.json'
-    metadata_blob = bucket.blob(metadata_blob_name)
-    metadata_data = json.loads(metadata_blob.download_as_text())
-    for data in metadata_data:
-        metadata_dict[data['unique_id']] = data
-
-    return embeddings_dict, metadata_dict
-
-# Process the first 500 files
-for file_number in range(1, 500):
-    index = Index(ndim=384, metric='cos', dtype='f32', expansion_add=128, expansion_search=64)
-    logging.info("USearch index initialized.")
-
-    embeddings_dict, metadata_dict = load_embeddings_and_metadata(file_number)
-
-    keys = list(embeddings_dict.keys())
-    embeddings_array = np.array(list(embeddings_dict.values()))
-
-    if len(keys) != len(embeddings_array):
-        logging.error(f"Mismatch in number of keys and embeddings: {len(keys)} keys, {len(embeddings_array)} embeddings")
+    if emb_blob.exists():
+        logging.info(f'Loading file: {emb_blob_name}')
+        embeddings_data = json.loads(emb_blob.download_as_text())
+        return {data['unique_id']: np.array(data['embedding'], dtype=np.float32) for data in embeddings_data}
     else:
-        index.add(keys, embeddings_array, threads=4)
-        logging.info(f"Processed file {file_number}")
+        logging.warning(f'File not found: {emb_blob_name}')
+        return {}
 
-        # Perform clustering
-        clustering = index.cluster(min_count=300, max_count=600e)
-        centroid_keys, sizes = clustering.centroids_popularity
-        clustering.plot_centroids_popularity()
+def log_memory_usage():
+    process = psutil.Process(os.getpid())
+    mem_usage = process.memory_info().rss / 1024 ** 2  # Convert RSS to MB
+    logging.info(f'Memory usage: {mem_usage:.2f} MB')
+    return mem_usage
 
-        # Save the index and clustering to disk
-        index.save(f"my_usearch_index_{file_number}.usearch")
-        with open(f'clustering_{file_number}.json', 'w') as f:
-            json.dump({"centroid_keys": centroid_keys.tolist(), "sizes": sizes.tolist()}, f)        
+# Initialize or load the index
+index_file_name = 'index.usearch'
+index = Index(ndim=384, metric='cos', dtype='f32', expansion_add=128, expansion_search=64)
 
-        logging.info(f"Index and clustering saved to disk for file {file_number}")
+total_files = 13627
+batch_size = 10
 
-        # Clear memory of large objects and run garbage collection
-        del embeddings_dict, metadata_dict, keys, embeddings_array, clustering
-        gc.collect()
+for i in range(1, total_files + 1, batch_size):
+    logging.info(f'Starting batch processing from file {i}')
+    for file_number in range(i, min(i + batch_size, total_files + 1)):
+        embeddings_dict = load_embeddings(file_number)
+        if embeddings_dict:
+            new_keys = [key for key in embeddings_dict.keys()]
+            new_embeddings = np.array(list(embeddings_dict.values()))
+            index.add(new_keys, new_embeddings, threads=4)
+
+            # Clear numpy arrays and force garbage collection
+            del new_keys, new_embeddings, embeddings_dict
+            gc.collect()
+
+        log_memory_usage()
+
+    # Save and close index to free up memory
+    index.save(index_file_name)
+    del index
+    gc.collect()
+    index = Index.restore(index_file_name)
+    logging.info(f'Index saved and reloaded after processing file {min(i + batch_size - 1, total_files)}')
+
+logging.info('Index creation completed.')

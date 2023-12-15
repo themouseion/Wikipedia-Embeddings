@@ -1,5 +1,5 @@
 import json
-import gc  # Garbage Collector
+import gc  
 import logging
 import hashlib
 import time
@@ -13,19 +13,16 @@ logging.basicConfig(
 
 # Initialize Google Cloud Storage client and bucket
 client = storage.Client()
-bucket_name = "mouseion-embeddings"  # Replace with your bucket name
+bucket_name = "mouseion-embeddings" 
 bucket = client.bucket(bucket_name)
 
-start_file_number = 3002
-end_file_number = 4000
+
+start_file_number = 2519  
+end_file_number = 2579
 chunk_size = 10
 embeddings_per_file = 10000
 
-# Initialize the total number of embeddings processed
-total_embeddings = 0
-
-def add_id_to_embedding(embedding_blob):
-    global total_embeddings
+def add_id_to_embedding(embedding_blob, start_id):
     logging.info(f"Processing embedding file: {embedding_blob.name}")
 
     # Read the embedding data
@@ -39,11 +36,13 @@ def add_id_to_embedding(embedding_blob):
 
     # Overwrite the unique ID for each embedding
     for index, embedding in enumerate(embeddings):
-        # Assign a new numerical 'unique_id'
-        embeddings[index] = {"unique_id": total_embeddings + index, "embedding": embedding}
-
-    # Update the total number of embeddings processed
-    total_embeddings += len(embeddings)
+        # If the embedding is a dictionary with 'unique_id' and 'embedding' keys
+        if isinstance(embedding, dict) and "unique_id" in embedding and "embedding" in embedding:
+            # Overwrite the 'unique_id' and keep the 'embedding' as is
+            embeddings[index] = {"unique_id": start_id + index, "embedding": embedding["embedding"]}
+        else:
+            # Assign a new numerical 'unique_id' and the embedding
+            embeddings[index] = {"unique_id": start_id + index, "embedding": embedding}
 
     # Write the updated embeddings back to the file
     retry_attempts = 3
@@ -89,11 +88,9 @@ def add_id_to_associated_data(associated_data_blob, unique_ids):
     logging.info(f"Updated associated data file: {associated_data_blob.name} with unique IDs")
 
 def process_chunk(start, end):
-    global total_embeddings
     logging.info(f"Processing chunk from {start} to {end}")
     for i in range(start, end + 1):
-        # Reset total_embeddings to 0 for each file
-        total_embeddings = 0
+        start_id = (i - 1) * embeddings_per_file  # Calculate start_id based on file number
 
         emb_blob_name = f"embeddings_paraphrase_{i}.json"
         associated_data_blob_name = f"associated_data_{i}.json"
@@ -103,7 +100,7 @@ def process_chunk(start, end):
         associated_data_blob = bucket.blob(associated_data_blob_name)
 
         # Add unique ID to embedding file and get the unique IDs
-        unique_ids = add_id_to_embedding(emb_blob)
+        unique_ids = add_id_to_embedding(emb_blob, start_id)
 
         # Add unique ID to associated data file
         add_id_to_associated_data(associated_data_blob, unique_ids)

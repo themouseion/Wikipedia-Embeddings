@@ -35,7 +35,7 @@ for blob in blobs:
 # Sorting file_ids to ensure consistency across different machines
 file_ids.sort()
 
-file_ids_to_process = range(11, 12)
+file_ids_to_process = range(1, 2)
 # range(1, 12)  # specify the file IDs you want to process
 
 for file_id in file_ids_to_process:

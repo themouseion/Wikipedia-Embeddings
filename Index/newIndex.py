@@ -32,9 +32,17 @@ def log_memory_usage():
     logging.info(f'Memory usage: {mem_usage:.2f} MB')
     return mem_usage
 
-# Initialize or load the index
+# Initialize or view the index
 index_file_name = 'index.usearch'
-index = Index(ndim=384, metric='cos', dtype='f32', expansion_add=128, expansion_search=64)
+if os.path.exists(index_file_name):
+    # Create a memory-mapped view of the index
+    index = Index(ndim=384, metric='cos', dtype='f32', expansion_add=128, expansion_search=64)
+    index.view(index_file_name)
+    logging.info("Memory-mapped view of index created.")
+else:
+    # Initialize a new Usearch index
+    index = Index(ndim=384, metric='cos', dtype='f32', expansion_add=128, expansion_search=64)
+    logging.info("Usearch index initialized.")
 
 total_files = 13627
 batch_size = 10
@@ -47,18 +55,19 @@ for i in range(1, total_files + 1, batch_size):
             new_keys = [key for key in embeddings_dict.keys()]
             new_embeddings = np.array(list(embeddings_dict.values()))
             index.add(new_keys, new_embeddings, threads=4)
-
-            # Clear numpy arrays and force garbage collection
-            del new_keys, new_embeddings, embeddings_dict
+            del embeddings_dict, new_embeddings
             gc.collect()
 
         log_memory_usage()
 
-    # Save and close index to free up memory
+    # Save the index
     index.save(index_file_name)
-    del index
-    gc.collect()
-    index = Index.restore(index_file_name)
-    logging.info(f'Index saved and reloaded after processing file {min(i + batch_size - 1, total_files)}')
+    blob = bucket.blob(index_file_name)
+    blob.upload_from_filename(index_file_name)
+    logging.info(f'Index saved and uploaded after processing up to file {min(i + batch_size - 1, total_files)}')
+
+    # Refresh the memory-mapped view
+    index.view(index_file_name)
+    logging.info(f"Memory-mapped view refreshed after processing up to file {min(i + batch_size - 1, total_files)}")
 
 logging.info('Index creation completed.')
